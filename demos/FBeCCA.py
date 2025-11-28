@@ -65,7 +65,7 @@ kfold = 6
 indices = generate_kfold_indices(meta, kfold=kfold)
 
 # classifier
-filterweights = [(idx_filter+1) ** (-1.25) + 0.25 for idx_filter in range(5)]
+filterweights = [(idx_filter+1) ** (-1.25) + 0.25 for idx_filter in range(5)] # wn = n^-a + b, n∈[1,N], a=1.25, b=0.25, hotmap
 
 estimator=FBECCA(filterbank=filterbank, n_components=1, filterweights=np.array(filterweights), n_jobs=-1)
 
