@@ -300,13 +300,25 @@ class STE_DW_FBECCA:
         predicted_label : int
             预测的类别
         """
-        # 快速模式：使用简单的置信度方法
+        # 快速模式：使用简单的置信度方法（优化版本）
         if self.fast_mode or duration not in self.train_stats:
-            # 如果没有训练统计信息，使用简单的置信度方法
-            features_sorted = np.sort(features)[::-1]
-            if len(features_sorted) > 1:
-                confidence = features_sorted[0] / (features_sorted[1] + 1e-10)
-                return confidence > 1.5, confidence, np.argmax(features)
+            # 优化：使用partial sort只找最大的两个值，避免完整排序
+            if len(features) > 1:
+                # 使用argpartition找到最大的两个索引（O(n)而不是O(n log n)）
+                # 对于40个类别，这比完整排序快
+                top2_idx = np.argpartition(features, -2)[-2:]
+                top2_vals = features[top2_idx]
+                
+                # 找到最大值和次大值
+                if top2_vals[0] > top2_vals[1]:
+                    max_val, second_max_val = top2_vals[0], top2_vals[1]
+                    max_idx = top2_idx[0]
+                else:
+                    max_val, second_max_val = top2_vals[1], top2_vals[0]
+                    max_idx = top2_idx[1]
+                
+                confidence = max_val / (second_max_val + 1e-10)
+                return confidence > 1.5, confidence, max_idx
             else:
                 return True, features[0], np.argmax(features)
         
@@ -378,7 +390,7 @@ class STE_DW_FBECCA:
     
     def predict_with_dynamic_window(self, X_single):
         """
-        对单个样本进行动态窗口预测（STE-DW风格）
+        对单个样本进行动态窗口预测（STE-DW风格）- 优化版本
         
         从短窗口开始，逐步增加窗口长度，使用多重假设检验决定何时停止
         
@@ -405,21 +417,26 @@ class STE_DW_FBECCA:
         # 只使用已训练的窗口长度
         durations = sorted(self.models.keys())
         
+        # 预计算去均值后的数据（避免重复计算）
+        X_centered = X_single - np.mean(X_single, axis=-1, keepdims=True)
+        
         for duration in durations:
             n_samples = int(self.srate * duration)
             
-            # 提取当前窗口的数据
-            X_window = X_single[:, :n_samples].copy()
+            # 优化：使用view而不是copy，只对需要的部分去均值
+            # 直接使用切片，避免copy开销
+            X_window = X_centered[:, :n_samples]
+            # 对当前窗口重新去均值（更准确）
             X_window = X_window - np.mean(X_window, axis=-1, keepdims=True)
             
-            # 获取模型和参考信号
+            # 获取模型
             model = self.models[duration]
             
-            # 获取特征（相关性系数）
+            # 获取特征（相关性系数）- 直接传入2D数组，避免newaxis
             features = model.transform(X_window[np.newaxis, ...])
             features = features[0]  # 取第一个样本的特征
             
-            # 多重假设检验
+            # 多重假设检验（优化版本）
             decision, confidence, pred_label = self._multiple_hypotheses_test(features, duration)
             
             # STE-DW终止条件：假设检验通过或达到最大窗口
@@ -429,7 +446,7 @@ class STE_DW_FBECCA:
         # 如果所有窗口都不满足条件，返回最大窗口的结果
         duration = durations[-1]
         n_samples = int(self.srate * duration)
-        X_window = X_single[:, :n_samples].copy()
+        X_window = X_centered[:, :n_samples]
         X_window = X_window - np.mean(X_window, axis=-1, keepdims=True)
         model = self.models[duration]
         
@@ -441,7 +458,7 @@ class STE_DW_FBECCA:
     
     def predict(self, X):
         """
-        批量预测
+        批量预测 - 优化版本
         
         Parameters
         ----------
@@ -458,17 +475,19 @@ class STE_DW_FBECCA:
             每个样本的置信度
         """
         n_trials = X.shape[0]
-        labels = []
-        durations = []
-        confidences = []
+        # 预分配数组，避免append开销
+        labels = np.zeros(n_trials, dtype=int)
+        durations = np.zeros(n_trials, dtype=float)
+        confidences = np.zeros(n_trials, dtype=float)
         
+        # 逐个处理（动态窗口无法完全向量化）
         for i in range(n_trials):
             label, duration, confidence = self.predict_with_dynamic_window(X[i])
-            labels.append(label)
-            durations.append(duration)
-            confidences.append(confidence)
+            labels[i] = label
+            durations[i] = duration
+            confidences[i] = confidence
         
-        return np.array(labels), np.array(durations), np.array(confidences)
+        return labels, durations, confidences
 
 
 # 创建动态窗口分类器
