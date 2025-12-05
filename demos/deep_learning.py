@@ -10,6 +10,7 @@ from metabci.brainda.algorithms.utils.model_selection import (
     generate_kfold_indices, match_kfold_indices)
 from metabci.brainda.algorithms.decomposition import CSP
 from metabci.brainda.algorithms.deep_learning.shallownet import ShallowNet
+from metabci.brainda.algorithms.deep_learning.eegnet import EEGNet
 from metabci.brainda.algorithms.deep_learning.deepnet import Deep4Net
 from metabci.brainda.datasets import AlexMI
 from metabci.brainda.paradigms import MotorImagery

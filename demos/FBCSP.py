@@ -9,7 +9,7 @@ from metabci.brainda.algorithms.utils.model_selection import (
     generate_kfold_indices, match_kfold_indices)
 from metabci.brainda.algorithms.decomposition import FBCSP
 from metabci.brainda.algorithms.decomposition.base import generate_filterbank
-
+# 运动想象
 wp=[(4,8),(8,12),(12,30)]
 ws=[(2,10),(6,14),(10,32)]
 filterbank = generate_filterbank(wp,ws,srate=128,order=4,rp=0.5)

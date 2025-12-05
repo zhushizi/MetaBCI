@@ -14,6 +14,12 @@ from metabci.brainstim.paradigm import (
 )
 from metabci.brainstim.framework import Experiment
 from psychopy.tools.monitorunittools import deg2pix
+'''
+离线模式（online=False）：呈现刺激并可发送触发，采集软件记录数据，事后离线训练/分析。
+    离线模式的重点是“呈现刺激+发送触发”，不涉及实时解码。
+在线模式（online=True）：仍需实时采集数据，实时送入解码程序（如 brainflow 在线 demo 的 FeedbackWorker），
+    得到预测标签后立刻回传给刺激程序显示反馈。在线模式的重点是“实时解码+反馈”，不是不采集数据，而是用实时数据做即时识别。
+'''
 
 if __name__ == "__main__":
     mon = monitors.Monitor(
@@ -193,7 +199,8 @@ if __name__ == "__main__":
     index_time = 0.5  # 提示时长，转移视线
     response_time = 2  # 在线反馈
     rest_time = 0.5  # 提示后的休息时长
-    port_addr = "COM8"  #  0xdefc                                  # 采集主机端口
+    # 如果端口不存在请设置为 None
+    port_addr = None  #  0xdefc                                  # 采集主机端口，如果端口不存在请设置为 None
     nrep = 1  # block数目
     lsl_source_id = "meta_online_worker"  # None                 # source id
     online = False  # True                                       # 在线实验的标志
@@ -249,7 +256,8 @@ if __name__ == "__main__":
     rest_time = 1  # 提示后的休息时长
     image_time = 4  # 想象时长
     response_time = 2  # 在线反馈
-    port_addr = "COM8"  #  0xdefc                                  # 采集主机端口
+    # 如果端口不存在请设置为 None
+    port_addr = None  #  0xdefc                                  # 采集主机端口，如果端口不存在请设置为 None
     nrep = 15  # block数目
     lsl_source_id = "meta_online_worker"  # source id
     online = False  # True                                       # 在线实验的标志
