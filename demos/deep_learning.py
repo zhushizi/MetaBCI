@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.svm import SVC
 from sklearn.pipeline import make_pipeline
 
-from metabci.brainda.algorithms.deep_learning import ConvCA, EEGNet
+from metabci.brainda.algorithms.deep_learning import ConvCA
 from metabci.brainda.algorithms.deep_learning.guney_net import GuneyNet
 from metabci.brainda.algorithms.utils.model_selection import (
     set_random_seeds,
