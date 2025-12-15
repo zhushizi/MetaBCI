@@ -12,9 +12,10 @@ International Journal of Neural Systems, doi: 10.1142/S0129065718500284
 - Dynamic Window: 从短窗口开始，逐步增加窗口长度
 - 根据置信度（最大特征值/次大特征值）自适应决定何时停止
 - 提高ITR（信息传输率）：简单样本提前停止，困难样本延长窗口
+- 窗口长度是由“最短且已过置信度阈值”的窗口决定的
 """
-import sys
 import numpy as np
+import time
 from metabci.brainda.datasets import Wang2016
 from metabci.brainda.paradigms import SSVEP
 from metabci.brainda.algorithms.utils.model_selection import (
@@ -80,6 +81,7 @@ X, y, meta = paradigm.get_data(
     verbose=False)
 
 print(f"提取的数据形状: {X.shape}")  # 应该是 (n_trials, n_channels, 250个时间点，对应1秒)
+print(f"总样本数: {len(X)}")
 
 # 6-fold cross validation
 set_random_seeds(38)
@@ -167,8 +169,8 @@ class DynamicWindowFBECCA:
             estimator.fit(X=X_window, y=y, Yf=Yf)
             self.models[duration] = estimator
             
-            print(f"  完成窗口长度 {duration:.2f}s 的训练 (数据点: {n_samples})", end='\r')
-        print()  # 换行
+            print(f"  完成窗口长度 {duration:.2f}s 的训练 (数据点: {n_samples})")
+        print(f"  共训练了 {len(self.models)} 个窗口长度的模型")
     
     def _check_confidence(self, features):
         """
@@ -248,7 +250,9 @@ class DynamicWindowFBECCA:
             model = self.models[duration]
             
             # 获取特征（相关性系数）- 直接传入2D数组，避免newaxis
+            transform_start = time.time()
             features = model.transform(X_window[np.newaxis, ...])
+            transform_time = time.time() - transform_start
             features = features[0]  # 取第一个样本的特征
             
             # 检查置信度
@@ -273,7 +277,11 @@ class DynamicWindowFBECCA:
     
     def predict(self, X):
         """
-        批量预测 - 优化版本
+        批量预测 - 优化版本 (Batch Processing)
+        
+        优化策略：
+        不再逐个样本进行动态窗口搜索，而是先对所有样本计算所有窗口长度的特征。
+        这样可以利用 transform 的批量处理优势，避免单样本处理的开销。
         
         Parameters
         ----------
@@ -290,17 +298,62 @@ class DynamicWindowFBECCA:
             每个样本的置信度
         """
         n_trials = X.shape[0]
-        # 预分配数组，避免append开销
+        # 预分配结果数组
         labels = np.zeros(n_trials, dtype=int)
         durations = np.zeros(n_trials, dtype=float)
         confidences = np.zeros(n_trials, dtype=float)
         
-        # 逐个处理（动态窗口无法完全向量化）
-        for i in range(n_trials):
-            label, duration, confidence = self.predict_with_dynamic_window(X[i])
-            labels[i] = label
-            durations[i] = duration
-            confidences[i] = confidence
+        # 记录每个样本是否已经完成分类
+        finished_mask = np.zeros(n_trials, dtype=bool)
+        
+        # 预计算去均值（可选，transform内部通常也会做）
+        X_centered = X - np.mean(X, axis=-1, keepdims=True)
+        
+        # 获取所有训练过的窗口长度并排序
+        trained_durations = sorted(self.models.keys())
+        
+        print("  开始批量特征提取...")
+        
+        # 遍历所有窗口长度
+        for duration in trained_durations:
+            # 如果所有样本都已完成，提前退出
+            if np.all(finished_mask):
+                break
+                
+            n_samples = int(self.srate * duration)
+            
+            # 提取当前窗口长度的数据（所有样本）
+            # 优化：使用切片
+            X_window = X_centered[..., :n_samples]
+            X_window = X_window - np.mean(X_window, axis=-1, keepdims=True)
+            
+            # 获取对应长度的模型
+            model = self.models[duration]
+            
+            # 批量计算特征！这是速度提升的关键
+            # transform 会并行处理 n_trials 个样本
+            # 注意：只对未完成的样本计算可能更省，但为了利用批量优势，
+            # 且FilterBank实现可能不支持部分索引的高效处理，
+            # 我们对所有样本计算，或者只计算未完成的样本（需要重组数组）
+            
+            # 策略：只计算未完成的样本
+            active_indices = np.where(~finished_mask)[0]
+            if len(active_indices) == 0:
+                break
+                
+            features_batch = model.transform(X_window[active_indices])
+            
+            # 逐个检查置信度
+            for i, idx in enumerate(active_indices):
+                features = features_batch[i]
+                decision, confidence, pred_label = self._check_confidence(features)
+                
+                # 如果满足条件，或者已经是最大窗口
+                if decision or duration >= self.max_duration:
+                    labels[idx] = pred_label
+                    durations[idx] = duration
+                    confidences[idx] = confidence
+                    finished_mask[idx] = True
         
         return labels, durations, confidences
 
@@ -327,19 +380,34 @@ all_durations = []
 all_confidences = []
 all_y_true = []
 all_y_pred = []
+train_times = []
+predict_times = []
 
 for k in range(kfold):
     train_ind, validate_ind, test_ind = match_kfold_indices(k, meta, indices)
     # merge train and validate set
     train_ind = np.concatenate((train_ind, validate_ind))
     
+    # 打印样本数信息
+    print(f"\nFold {k+1} 数据划分:")
+    print(f"  训练样本数: {len(train_ind)}")
+    print(f"  测试样本数: {len(test_ind)}")
+    
     # 训练模型
-    print(f"\n训练 Fold {k+1}...")
+    print(f"训练 Fold {k+1}...")
+    train_start = time.time()
     estimator.fit(X=X[train_ind], y=y[train_ind])
+    train_time = time.time() - train_start
+    train_times.append(train_time)
+    print(f"  训练耗时: {train_time:.2f} 秒")
     
     # 预测
     print(f"预测 Fold {k+1}...")
+    predict_start = time.time()
     p_labels, durations, confidences = estimator.predict(X[test_ind])
+    predict_time = time.time() - predict_start
+    predict_times.append(predict_time)
+    print(f"  预测耗时: {predict_time:.2f} 秒 (平均每个样本: {predict_time/len(test_ind)*1000:.2f} 毫秒)")
     
     # 计算准确率
     acc = np.mean(p_labels == y[test_ind])
@@ -355,9 +423,16 @@ for k in range(kfold):
 print("\n" + "="*70)
 print("动态窗口FBECCA结果:")
 print("="*70)
+print(f"总样本数: {len(X)}")
+print(f"测试样本总数: {len(all_y_true)}")
 print(f"平均准确率: {np.mean(accs):.4f} ± {np.std(accs):.4f}")
 print(f"平均窗口长度: {np.mean(all_durations):.2f}s ± {np.std(all_durations):.2f}s")
 print(f"平均置信度: {np.mean(all_confidences):.4f} ± {np.std(all_confidences):.4f}")
+print(f"\n时间统计:")
+print(f"  总训练时间: {np.sum(train_times):.2f} 秒 (平均每个fold: {np.mean(train_times):.2f} 秒)")
+print(f"  总预测时间: {np.sum(predict_times):.2f} 秒 (平均每个fold: {np.mean(predict_times):.2f} 秒)")
+print(f"  预测/训练时间比: {np.sum(predict_times)/np.sum(train_times):.2f}x")
+print(f"  平均每个测试样本预测时间: {np.sum(predict_times)/len(all_y_true)*1000:.2f} 毫秒")
 
 # 计算ITR（信息传输率）- 动态窗口的主要优势
 performance = Performance(estimators_list=["Acc", "tITR"], Tw=np.mean(all_durations))

@@ -77,7 +77,7 @@ def train_model(X, y, srate=1000):
     filterbank = generate_filterbank(wp, ws, 256)
 
     freqs = np.arange(8, 16, 0.4)
-    Yf = generate_cca_references(freqs, srate=256, T=0.5, n_harmonics=5)
+    Yf = generate_cca_references(freqs, srate=256, T=0.5, n_harmonics=5) # 生成参考信号,用于CCA分析
     model = FBTDCA(filterbank, padding_len=3, n_components=4,
                    filterweights=np.array(filterweights))
     model = model.fit(X, y, Yf=Yf)

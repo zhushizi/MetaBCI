@@ -1792,14 +1792,14 @@ class TRCA(BaseEstimator, TransformerMixin, ClassifierMixin):
         Yf: ndarray
             Reference signal(n_classes, 2*n_harmonics, n_samples)
         """
-        self.classes_ = np.unique(y)
-        X = np.reshape(X, (-1, *X.shape[-2:]))
-        X = X - np.mean(X, axis=-1, keepdims=True)
+        self.classes_ = np.unique(y) # 获取所有类别
+        X = np.reshape(X, (-1, *X.shape[-2:])) # 将X重塑为(n_trials, n_channels, n_samples)
+        X = X - np.mean(X, axis=-1, keepdims=True) # 去均值，目的是减少计算量
         self.templates_ = np.stack(
-            [np.mean(X[y == label], axis=0) for label in self.classes_]
+            [np.mean(X[y == label], axis=0) for label in self.classes_] # 计算每个类别的平均模板
         )
 
-        self.Us_ = np.stack([_trca_kernel(X[y == label]) for label in self.classes_])
+        self.Us_ = np.stack([_trca_kernel(X[y == label]) for label in self.classes_]) # 计算每个类别的空间滤波器
         return self
 
     def transform(self, X: ndarray):
