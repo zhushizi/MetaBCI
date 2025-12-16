@@ -837,18 +837,18 @@ class ECCA(BaseEstimator, TransformerMixin, ClassifierMixin):
         X = X - np.mean(X, axis=-1, keepdims=True)
         self.templates_ = np.stack(
             [np.mean(X[y == label], axis=0) for label in self.classes_]
-        )
+        ) # 计算每个类别的平均模板
 
         Yf = np.reshape(Yf, (-1, *Yf.shape[-2:]))
         Yf = Yf - np.mean(Yf, axis=-1, keepdims=True)
-        self.Yf_ = Yf
+        self.Yf_ = Yf # 计算每个类别的参考信号
         self.Us_, self.Vs_ = zip(
             *[
-                _scca_kernel(self.templates_[i], self.Yf_[i])
+                _scca_kernel(self.templates_[i], self.Yf_[i]) # 计算每个类别的空间滤波器，本质上是一个权重矩阵，通过矩阵乘法实现多通道信号的线性组合和降维。
                 for i in range(len(self.classes_))
             ]
-        )
-        self.Us_, self.Vs_ = np.stack(self.Us_), np.stack(self.Vs_)
+        ) # 计算每个类别的空间滤波器
+        self.Us_, self.Vs_ = np.stack(self.Us_), np.stack(self.Vs_) # 将空间滤波器堆叠成一个数组
         return self
 
     def transform(self, X: ndarray):
